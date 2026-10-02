@@ -2,19 +2,23 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
-import apiRouter from './server/api';
-import { getDatabase } from './server/db';
+import apiRouter from './server/api.ts';
+import { getDatabase } from './server/db.ts';
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.APP_PORT || process.env.DEFAULT_APP_PORT || 3000);
 
-  // Static serving for user uploads: check public/uploads, src/assets/images, and dist/uploads
+  // Static serving for public folder and user uploads
+  app.use(express.static(path.join(process.cwd(), 'public')));
+  app.use('/fonts', express.static(path.join(process.cwd(), 'public', 'fonts')));
   app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
   app.use('/uploads', express.static(path.join(process.cwd(), 'src', 'assets', 'images')));
   app.use('/uploads', express.static(path.join(process.cwd(), 'dist', 'uploads')));
   app.use('/public/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
   app.use('/src/assets/images', express.static(path.join(process.cwd(), 'src', 'assets', 'images')));
+  app.use('/assets', express.static(path.join(process.cwd(), 'src', 'assets')));
+  
   // If an /uploads request is not found, return 404 instead of letting Vite or SPA fallback return index.html
   app.use('/uploads', (req, res) => {
     res.status(404).json({ error: 'Image not found in uploads' });
@@ -27,12 +31,12 @@ async function startServer() {
   // Mount API router
   app.use('/api', apiRouter);
 
-  // Health check
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', time: new Date().toISOString() });
+  // Health checks for Cloud Run rollout and proxy validation
+  app.get(['/health', '/api/health'], (_req, res) => {
+    res.status(200).json({ status: 'ok', time: new Date().toISOString() });
   });
 
-  // Helper to generate bootstrap script from persistent data source
+  // Helper to generate bootstrap script from persistent data source safely
   const getBootstrapInjection = () => {
     try {
       const db = getDatabase();
@@ -42,7 +46,8 @@ async function startServer() {
         settings: db.settings || null,
         timestamp: Date.now(),
       };
-      return `<script id="__LARIEL_BOOTSTRAP_DATA__">window.__LARIEL_INITIAL_PRODUCTS__ = ${JSON.stringify(payload.products)}; window.__LARIEL_INITIAL_CATEGORIES__ = ${JSON.stringify(payload.categories)}; window.__LARIEL_INITIAL_SETTINGS__ = ${JSON.stringify(payload.settings)};</script>`;
+      const safePayload = JSON.stringify(payload).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+      return `<script id="__LARIEL_BOOTSTRAP_DATA__">try{const d=${safePayload};window.__LARIEL_INITIAL_PRODUCTS__=d.products;window.__LARIEL_INITIAL_CATEGORIES__=d.categories;window.__LARIEL_INITIAL_SETTINGS__=d.settings;}catch(e){console.error("Bootstrap data load error:",e);}</script>`;
     } catch (err) {
       console.error('Failed to read database for bootstrap injection:', err);
       return '';
@@ -58,6 +63,11 @@ async function startServer() {
     app.use(vite.middlewares);
 
     app.get('*', async (req, res, next) => {
+      // Do not return HTML for missing static files (scripts, stylesheets, images, fonts, maps)
+      if (req.path.includes('.') && !req.path.endsWith('.html')) {
+        return res.status(404).send('Not found');
+      }
+
       const url = req.originalUrl;
       try {
         const indexPath = path.resolve(process.cwd(), 'index.html');
@@ -65,7 +75,7 @@ async function startServer() {
         template = await vite.transformIndexHtml(url, template);
         const injection = getBootstrapInjection();
         if (injection) {
-          template = template.replace('</head>', `${injection}\n</head>`);
+          template = template.replace('</head>', () => `${injection}\n</head>`);
         }
         res.status(200)
           .set({
@@ -82,14 +92,23 @@ async function startServer() {
     });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    const rootIndexPath = path.join(process.cwd(), 'index.html');
     app.use(express.static(distPath, { index: false }));
+    app.use('/assets', express.static(path.join(distPath, 'assets')));
     app.get('*', (req, res) => {
-      const indexPath = path.join(distPath, 'index.html');
+      if (req.path.includes('.') && !req.path.endsWith('.html')) {
+        return res.status(404).send('Not found');
+      }
+
+      const indexPath = fs.existsSync(path.join(distPath, 'index.html'))
+        ? path.join(distPath, 'index.html')
+        : rootIndexPath;
+
       if (fs.existsSync(indexPath)) {
         let html = fs.readFileSync(indexPath, 'utf-8');
         const injection = getBootstrapInjection();
         if (injection) {
-          html = html.replace('</head>', `${injection}\n</head>`);
+          html = html.replace('</head>', () => `${injection}\n</head>`);
         }
         res.status(200)
           .set({

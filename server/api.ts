@@ -1,4 +1,5 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { put } from '@vercel/blob';
@@ -7,15 +8,17 @@ import {
   getDatabaseAsync,
   saveDatabase,
   logActivity,
+} from './db.ts';
+import type {
   DBProduct,
   DBCategory,
   DBOrder,
-} from './db';
+} from './db.ts';
 import {
   uploadPersistentMedia,
   deletePersistentMedia,
   listPersistentMedia,
-} from './storage';
+} from './storage.ts';
 
 const router = express.Router();
 

@@ -17,8 +17,9 @@ export const QuickViewModal: React.FC = () => {
 
   if (!quickViewProduct) return null;
 
-  const [selectedColor, setSelectedColor] = useState<ProductColor>(quickViewProduct.colors[0]);
-  const [selectedSize, setSelectedSize] = useState<string>(quickViewProduct.sizes[0] || 'Standard');
+  const defaultColor = quickViewProduct.colors?.[0] || { name: 'Natural', hex: '#FAF5EE' };
+  const [selectedColor, setSelectedColor] = useState<ProductColor>(defaultColor);
+  const [selectedSize, setSelectedSize] = useState<string>(quickViewProduct.sizes?.[0] || 'Standard');
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [personalisation, setPersonalisation] = useState('');
@@ -26,7 +27,7 @@ export const QuickViewModal: React.FC = () => {
   const wishlisted = isWishlisted(quickViewProduct.id);
 
   const handleAddToCart = () => {
-    addToCart(quickViewProduct, selectedColor, selectedSize, quantity, {
+    addToCart(quickViewProduct, selectedColor || defaultColor, selectedSize || 'Standard', quantity, {
       text: personalisation.trim() || undefined,
       role: 'Bride',
     });

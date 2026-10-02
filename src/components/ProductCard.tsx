@@ -20,15 +20,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, featured = fa
     showToast,
   } = useShop();
 
-  const [selectedColor, setSelectedColor] = useState<ProductColor>(product.colors[0]);
+  const defaultColor = product.colors?.[0] || { name: 'Natural', hex: '#FAF5EE' };
+  const [selectedColor, setSelectedColor] = useState<ProductColor>(defaultColor);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
   const wishlisted = isWishlisted(product.id);
 
   const handleQuickAdd = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const defaultSize = product.sizes[0] || 'Standard';
-    addToCart(product, selectedColor, defaultSize, 1);
+    const defaultSize = product.sizes?.[0] || 'Standard';
+    addToCart(product, selectedColor || defaultColor, defaultSize, 1);
   };
 
   return (
