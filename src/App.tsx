@@ -7,6 +7,7 @@ import { WishlistDrawer } from './components/WishlistDrawer';
 import { SearchModal } from './components/SearchModal';
 import { QuickViewModal } from './components/QuickViewModal';
 import { FloatingWhatsApp } from './components/FloatingWhatsApp';
+import { ToastNotification } from './components/ToastNotification';
 
 import { HomeView } from './views/HomeView';
 import { CollectionView } from './views/CollectionView';
@@ -61,6 +62,7 @@ const MainAppContent: React.FC = () => {
       <SearchModal />
       <QuickViewModal />
       <FloatingWhatsApp />
+      <ToastNotification />
     </div>
   );
 };

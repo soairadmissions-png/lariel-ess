@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import bundledDbData from '../data/db.json';
 
 export interface DBProductColor {
   name: string;
@@ -202,6 +203,12 @@ export function getDatabase(): DatabaseSchema {
     console.error('Error reading bundled database:', err);
   }
 
+  // 3. Bundled compiled fallback (guaranteed available in Vercel serverless bundle)
+  if (bundledDbData && Array.isArray((bundledDbData as any).products) && (bundledDbData as any).products.length > 0) {
+    memoryDatabase = JSON.parse(JSON.stringify(bundledDbData));
+    return memoryDatabase!;
+  }
+
   return {
     products: [],
     categories: [],
@@ -243,6 +250,7 @@ export async function saveDatabase(data: DatabaseSchema): Promise<void> {
       await put('database/db.json', JSON.stringify(data, null, 2), {
         access: 'public',
         addRandomSuffix: false,
+        allowOverwrite: true,
         token: process.env.BLOB_READ_WRITE_TOKEN,
       });
     } catch (blobErr) {
@@ -251,7 +259,7 @@ export async function saveDatabase(data: DatabaseSchema): Promise<void> {
   }
 }
 
-export function logActivity(action: string, adminName: string = 'Admin'): void {
+export async function logActivity(action: string, adminName: string = 'Admin'): Promise<void> {
   const db = getDatabase();
   const newLog: DBActivityLog = {
     id: `log-${Date.now()}`,
@@ -260,5 +268,5 @@ export function logActivity(action: string, adminName: string = 'Admin'): void {
     timestamp: new Date().toISOString(),
   };
   db.activityLogs = [newLog, ...(db.activityLogs || [])].slice(0, 50);
-  saveDatabase(db).catch(() => {});
+  await saveDatabase(db);
 }

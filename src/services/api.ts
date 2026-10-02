@@ -62,6 +62,86 @@ function getAuthHeaders(): HeadersInit {
   };
 }
 
+/**
+ * Compresses an image file before upload:
+ * - Resizes so that longest side is at most 2000px
+ * - Re-encodes as JPEG or WebP with quality 0.85
+ * - Keeps file well under Vercel's 4.5 MB serverless payload limit
+ */
+export async function compressImageIfNeeded(file: File): Promise<File> {
+  if (!file.type.startsWith('image/') || file.type.includes('svg')) {
+    return file;
+  }
+
+  return new Promise<File>((resolve) => {
+    if (typeof window === 'undefined' || !window.Image || !document.createElement) {
+      return resolve(file);
+    }
+
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const { width, height } = img;
+      const maxDimension = 2000;
+      let targetWidth = width;
+      let targetHeight = height;
+
+      if (width > maxDimension || height > maxDimension) {
+        if (width >= height) {
+          targetWidth = maxDimension;
+          targetHeight = Math.round((height * maxDimension) / width);
+        } else {
+          targetHeight = maxDimension;
+          targetWidth = Math.round((width * maxDimension) / height);
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext('2d');
+
+      if (!ctx) {
+        return resolve(file);
+      }
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+      const exportType = file.type === 'image/webp' ? 'image/webp' : 'image/jpeg';
+      const outputFilename = file.name.replace(/\.[^/.]+$/, '') + (exportType === 'image/webp' ? '.webp' : '.jpg');
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            return resolve(file);
+          }
+          if (blob.size >= file.size && width <= maxDimension && height <= maxDimension) {
+            return resolve(file);
+          }
+          const compressedFile = new File([blob], outputFilename, {
+            type: exportType,
+            lastModified: Date.now(),
+          });
+          resolve(compressedFile);
+        },
+        exportType,
+        0.85
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(file);
+    };
+
+    img.src = objectUrl;
+  });
+}
+
 export const api = {
   // Auth
   async login(email: string, password: string): Promise<{ success: boolean; user: AdminUser; token: string }> {
@@ -353,43 +433,64 @@ export const api = {
   },
 
   async uploadFile(file: File): Promise<{ url: string; fileName: string; size: number }> {
+    // Compress image before upload (max 2000px on longest side, quality 0.85)
+    const fileToUpload = await compressImageIfNeeded(file);
+
     const token = getAdminToken() || 'lariel_super_admin_sec_token_2026';
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
     try {
-      const res = await fetch(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
+      const res = await fetch(`/api/upload?filename=${encodeURIComponent(fileToUpload.name)}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': file.type || 'application/octet-stream',
-          'x-filename': encodeURIComponent(file.name),
+          'Content-Type': fileToUpload.type || 'application/octet-stream',
+          'x-filename': encodeURIComponent(fileToUpload.name),
         },
-        body: file,
+        body: fileToUpload,
+        signal: controller.signal,
       });
-      if (res.ok) {
-        const data = await res.json();
+
+      clearTimeout(timeoutId);
+
+      // Read response body as text first to handle both JSON and HTML error pages safely
+      const responseText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        // Not valid JSON (e.g. Vercel 500 HTML error page)
+      }
+
+      if (res.ok && data) {
         return {
           url: data.url || data.blob?.url,
-          fileName: data.fileName || file.name,
-          size: data.size || file.size,
+          fileName: data.fileName || fileToUpload.name,
+          size: data.size || fileToUpload.size,
         };
       }
-      const err = await res.json().catch(() => ({}));
-      if (err.error) {
-        throw new Error(err.error);
-      }
-    } catch (err: any) {
-      if (err.message && !err.message.includes('fetch')) {
-        throw err;
-      }
-    }
 
-    // Fallback: convert to base64 and use /api/upload
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(new Error('Failed to read file'));
-      reader.readAsDataURL(file);
-    });
-    return this.uploadImage(dataUrl, file.name);
+      // Map 413 Payload Too Large
+      if (res.status === 413) {
+        throw new Error('Image too large. Please select a photo under 4.5 MB.');
+      }
+
+      const errorMsg =
+        data?.error ||
+        data?.message ||
+        (res.status >= 500
+          ? 'A server error occurred during upload. Please try again or check server logs.'
+          : `Upload failed (HTTP ${res.status}).`);
+
+      throw new Error(errorMsg);
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        throw new Error('Upload timed out after 30 seconds. Please check your connection and try again.');
+      }
+      throw err;
+    }
   },
 
   async uploadImage(base64Data: string, filename?: string): Promise<{ url: string; fileName: string; size?: number }> {
@@ -403,9 +504,18 @@ export const api = {
       headers: getAuthHeaders(),
       body: JSON.stringify({ data: base64Data, filename }),
     });
-    const data = await res.json();
+
+    const responseText = await res.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(responseText);
+    } catch {}
+
     if (!res.ok) {
-      throw new Error(data.error || 'Failed to upload image');
+      if (res.status === 413) {
+        throw new Error('Image too large. Please select a photo under 4.5 MB.');
+      }
+      throw new Error(data?.error || data?.message || 'Failed to upload image');
     }
     return data;
   },

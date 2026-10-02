@@ -36,6 +36,10 @@ router.use(async (_req: Request, _res: Response, next: NextFunction) => {
 });
 
 // Bootstrap endpoint for full initial state
+router.get(['/health', '/api/health'], (_req: Request, res: Response) => {
+  res.json({ status: 'ok', platform: 'vercel', time: new Date().toISOString() });
+});
+
 router.get('/bootstrap', (_req: Request, res: Response) => {
   const db = getDatabase();
   res.json({
@@ -84,7 +88,7 @@ const DEMO_ADMIN = {
 };
 const DEMO_ADMIN_ALT_EMAIL = 'admin@larielessentials.com';
 
-router.post('/auth/login', (req: Request, res: Response) => {
+router.post('/auth/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
   const db = getDatabase();
   const admin = db.admins[0] || {
@@ -103,7 +107,7 @@ router.post('/auth/login', (req: Request, res: Response) => {
     (email && password === 'admin123') ||
     password === 'lariel2026'
   ) {
-    logActivity(`Admin logged in: ${admin.name} (${admin.email})`, admin.name);
+    await logActivity(`Admin logged in: ${admin.name} (${admin.email})`, admin.name);
     return res.json({
       success: true,
       token: AUTH_TOKEN,
@@ -273,7 +277,7 @@ router.post('/products', requireAdmin, async (req: Request, res: Response) => {
 
   db.products.unshift(newProduct);
   await saveDatabase(db);
-  logActivity(`Created product "${newProduct.name}" (${newProduct.sku})`);
+  await logActivity(`Created product "${newProduct.name}" (${newProduct.sku})`);
 
   res.status(201).json(newProduct);
 });
@@ -332,7 +336,7 @@ router.put('/products/:id', requireAdmin, async (req: Request, res: Response) =>
 
   db.products[index] = updatedProduct;
   await saveDatabase(db);
-  logActivity(`Updated product "${updatedProduct.name}"`);
+  await logActivity(`Updated product "${updatedProduct.name}"`);
 
   // Cleanup replaced persistent remote images only after product update has successfully saved
   if (existing.images && Array.isArray(existing.images)) {
@@ -372,13 +376,13 @@ router.delete('/products/:id', requireAdmin, async (req: Request, res: Response)
 
   db.products = db.products.filter((p) => p.id !== product.id);
   await saveDatabase(db);
-  logActivity(`Deleted product "${product.name}" (${product.sku})`);
+  await logActivity(`Deleted product "${product.name}" (${product.sku})`);
 
   res.json({ success: true, id: req.params.id });
 });
 
 // POST /api/products/:id/duplicate
-router.post('/products/:id/duplicate', requireAdmin, (req: Request, res: Response) => {
+router.post('/products/:id/duplicate', requireAdmin, async (req: Request, res: Response) => {
   const db = getDatabase();
   const product = db.products.find((p) => p.id === req.params.id);
 
@@ -402,14 +406,14 @@ router.post('/products/:id/duplicate', requireAdmin, (req: Request, res: Respons
   };
 
   db.products.unshift(duplicated);
-  saveDatabase(db);
-  logActivity(`Duplicated product "${product.name}" as "${duplicated.name}"`);
+  await saveDatabase(db);
+  await logActivity(`Duplicated product "${product.name}" as "${duplicated.name}"`);
 
   res.status(201).json(duplicated);
 });
 
 // PATCH /api/products/bulk
-router.patch('/products/bulk', requireAdmin, (req: Request, res: Response) => {
+router.patch('/products/bulk', requireAdmin, async (req: Request, res: Response) => {
   const { ids, action, value } = req.body;
 
   if (!Array.isArray(ids) || ids.length === 0) {
@@ -423,7 +427,7 @@ router.patch('/products/bulk', requireAdmin, (req: Request, res: Response) => {
     const initialCount = db.products.length;
     db.products = db.products.filter((p) => !ids.includes(p.id));
     affectedCount = initialCount - db.products.length;
-    logActivity(`Bulk deleted ${affectedCount} products`);
+    await logActivity(`Bulk deleted ${affectedCount} products`);
   } else if (action === 'setStatus') {
     db.products = db.products.map((p) => {
       if (ids.includes(p.id)) {
@@ -436,7 +440,7 @@ router.patch('/products/bulk', requireAdmin, (req: Request, res: Response) => {
       }
       return p;
     });
-    logActivity(`Bulk updated status to "${value}" for ${affectedCount} products`);
+    await logActivity(`Bulk updated status to "${value}" for ${affectedCount} products`);
   } else if (action === 'setCategory') {
     db.products = db.products.map((p) => {
       if (ids.includes(p.id)) {
@@ -449,10 +453,10 @@ router.patch('/products/bulk', requireAdmin, (req: Request, res: Response) => {
       }
       return p;
     });
-    logActivity(`Bulk changed category to "${value}" for ${affectedCount} products`);
+    await logActivity(`Bulk changed category to "${value}" for ${affectedCount} products`);
   }
 
-  saveDatabase(db);
+  await saveDatabase(db);
   res.json({ success: true, count: affectedCount });
 });
 
@@ -473,7 +477,7 @@ router.get('/categories', (req: Request, res: Response) => {
   res.json(categoriesWithCounts);
 });
 
-router.post('/categories', requireAdmin, (req: Request, res: Response) => {
+router.post('/categories', requireAdmin, async (req: Request, res: Response) => {
   const db = getDatabase();
   const { name, subtitle, description, heroImage, badge, slug } = req.body;
 
@@ -500,13 +504,13 @@ router.post('/categories', requireAdmin, (req: Request, res: Response) => {
   };
 
   db.categories.push(newCategory);
-  saveDatabase(db);
-  logActivity(`Created category "${newCategory.name}"`);
+  await saveDatabase(db);
+  await logActivity(`Created category "${newCategory.name}"`);
 
   res.status(201).json(newCategory);
 });
 
-router.put('/categories/:id', requireAdmin, (req: Request, res: Response) => {
+router.put('/categories/:id', requireAdmin, async (req: Request, res: Response) => {
   const db = getDatabase();
   const index = db.categories.findIndex((c) => c.id === req.params.id);
 
@@ -522,13 +526,13 @@ router.put('/categories/:id', requireAdmin, (req: Request, res: Response) => {
   };
 
   db.categories[index] = updated;
-  saveDatabase(db);
-  logActivity(`Updated category "${updated.name}"`);
+  await saveDatabase(db);
+  await logActivity(`Updated category "${updated.name}"`);
 
   res.json(updated);
 });
 
-router.delete('/categories/:id', requireAdmin, (req: Request, res: Response) => {
+router.delete('/categories/:id', requireAdmin, async (req: Request, res: Response) => {
   const db = getDatabase();
   const cat = db.categories.find((c) => c.id === req.params.id);
 
@@ -537,8 +541,8 @@ router.delete('/categories/:id', requireAdmin, (req: Request, res: Response) => 
   }
 
   db.categories = db.categories.filter((c) => c.id !== req.params.id);
-  saveDatabase(db);
-  logActivity(`Deleted category "${cat.name}"`);
+  await saveDatabase(db);
+  await logActivity(`Deleted category "${cat.name}"`);
 
   res.json({ success: true, id: req.params.id });
 });
@@ -552,7 +556,7 @@ router.get('/orders', requireAdmin, (req: Request, res: Response) => {
   res.json(db.orders || []);
 });
 
-router.post('/orders', (req: Request, res: Response) => {
+router.post('/orders', async (req: Request, res: Response) => {
   const db = getDatabase();
   const orderData = req.body;
 
@@ -576,13 +580,13 @@ router.post('/orders', (req: Request, res: Response) => {
   };
 
   db.orders.unshift(newOrder);
-  saveDatabase(db);
-  logActivity(`New order placed #${newOrder.orderId} by ${newOrder.customerName} (${newOrder.totalFormatted})`);
+  await saveDatabase(db);
+  await logActivity(`New order placed #${newOrder.orderId} by ${newOrder.customerName} (${newOrder.totalFormatted})`);
 
   res.status(201).json(newOrder);
 });
 
-router.patch('/orders/:id', requireAdmin, (req: Request, res: Response) => {
+router.patch('/orders/:id', requireAdmin, async (req: Request, res: Response) => {
   const db = getDatabase();
   const order = db.orders.find((o) => o.orderId === req.params.id);
 
@@ -593,8 +597,8 @@ router.patch('/orders/:id', requireAdmin, (req: Request, res: Response) => {
   if (req.body.status) order.status = req.body.status;
   if (req.body.trackingNumber) order.trackingNumber = req.body.trackingNumber;
 
-  saveDatabase(db);
-  logActivity(`Updated order #${order.orderId} status to "${order.status}"`);
+  await saveDatabase(db);
+  await logActivity(`Updated order #${order.orderId} status to "${order.status}"`);
 
   res.json(order);
 });
@@ -655,9 +659,11 @@ router.get('/dashboard/stats', requireAdmin, (req: Request, res: Response) => {
 // -------------------------------------------------------------
 
 router.post(['/upload', '/upload-raw'], async (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
   try {
     const rawFilename = (req.query.filename as string) || (req.headers['x-filename'] as string) || req.body?.filename || req.body?.name || `product_${Date.now()}.jpg`;
     const cleanFilename = decodeURIComponent(rawFilename).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const blobPath = `products/${Date.now()}_${cleanFilename}`;
     let contentType = (req.headers['content-type'] as string) || 'image/jpeg';
     let fileBuffer: Buffer | null = null;
 
@@ -689,14 +695,16 @@ router.post(['/upload', '/upload-raw'], async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'No image file provided for upload.' });
     }
 
-    // 3. Upload the file to Vercel Blob using put() with access: 'public'
+    // 3. Upload the file to Vercel Blob at "products/<Date.now()>_<filename>" with addRandomSuffix: true
     if (process.env.BLOB_READ_WRITE_TOKEN) {
-      const blob = await put(cleanFilename, fileBuffer, {
+      const blob = await put(blobPath, fileBuffer, {
         access: 'public',
         contentType,
+        addRandomSuffix: true,
+        token: process.env.BLOB_READ_WRITE_TOKEN,
       });
 
-      logActivity(`Uploaded persistent image to Vercel Blob: ${blob.url}`);
+      await logActivity(`Uploaded persistent image to Vercel Blob: ${blob.url}`);
 
       // 4. Return the Blob result as JSON providing permanent blob.url
       return res.json({
@@ -711,8 +719,8 @@ router.post(['/upload', '/upload-raw'], async (req: Request, res: Response) => {
     }
 
     // Fallback for development / offline environments without BLOB_READ_WRITE_TOKEN
-    const result = await uploadPersistentMedia(fileBuffer, cleanFilename, contentType);
-    logActivity(`Uploaded media file locally: ${result.fileName}`);
+    const result = await uploadPersistentMedia(fileBuffer, `${Date.now()}_${cleanFilename}`, contentType);
+    await logActivity(`Uploaded media file locally: ${result.fileName}`);
 
     return res.json({
       url: result.url,
@@ -722,7 +730,8 @@ router.post(['/upload', '/upload-raw'], async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('Upload to Vercel Blob error:', err);
-    return res.status(500).json({ error: err.message || 'Image upload to Vercel Blob failed.' });
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(500).json({ error: err?.message || 'Image upload to Vercel Blob failed.' });
   }
 });
 
@@ -752,14 +761,14 @@ router.get('/settings', (req: Request, res: Response) => {
   );
 });
 
-router.put('/settings', requireAdmin, (req: Request, res: Response) => {
+router.put('/settings', requireAdmin, async (req: Request, res: Response) => {
   const db = getDatabase();
   db.settings = {
     ...(db.settings || {}),
     ...req.body,
   };
-  saveDatabase(db);
-  logActivity('Updated site settings and hero imagery');
+  await saveDatabase(db);
+  await logActivity('Updated site settings and hero imagery');
   res.json(db.settings);
 });
 
@@ -772,7 +781,7 @@ router.get('/real-brides', (req: Request, res: Response) => {
   res.json(db.realBrides || []);
 });
 
-router.post('/real-brides', requireAdmin, (req: Request, res: Response) => {
+router.post('/real-brides', requireAdmin, async (req: Request, res: Response) => {
   const db = getDatabase();
   if (!db.realBrides) db.realBrides = [];
   
@@ -802,17 +811,17 @@ router.post('/real-brides', requireAdmin, (req: Request, res: Response) => {
     db.realBrides.unshift(brideStory);
   }
 
-  saveDatabase(db);
-  logActivity(`Published Real Bride feature: "${brideName}"`);
+  await saveDatabase(db);
+  await logActivity(`Published Real Bride feature: "${brideName}"`);
   res.json(brideStory);
 });
 
-router.delete('/real-brides/:id', requireAdmin, (req: Request, res: Response) => {
+router.delete('/real-brides/:id', requireAdmin, async (req: Request, res: Response) => {
   const db = getDatabase();
   if (!db.realBrides) db.realBrides = [];
   db.realBrides = db.realBrides.filter((b) => b.id !== req.params.id);
-  saveDatabase(db);
-  logActivity(`Deleted Real Bride feature with id "${req.params.id}"`);
+  await saveDatabase(db);
+  await logActivity(`Deleted Real Bride feature with id "${req.params.id}"`);
   res.json({ success: true, id: req.params.id });
 });
 
